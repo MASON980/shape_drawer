@@ -1,0 +1,531 @@
+<!--
+
+largely done from a 'to use with warlocks' perspective
+
+can save as picture, file format, or export as code as text, 
+	can open picture, or as fileformat/code (these two can then be edited, like how you can edit layers in gimp files)
+		also find a vector format like svg to convert into
+
+	
+gotta do other shapes too, like circle, arc, rectangle, polygon
+
+
+BUGS
+	sometimes it turns into an actual shape, make than possible to return from , and more evident how to do it
+
+	alt disconnects but I think that might be my keyboard
+
+
+CIRCLE/POLYGON
+	handle the getColours() returning over the top of the 'drawing' of the node
+
+	if someone clicks but doesnt drag leave it as a point
+
+	node will be the centre point and the dragging point for the circle, and all corners of a polygon, moving the centre moves the entire shape? could give all shapes a centre point used to drag them
+
+	howw to handle angles (eg. a semi circle instead of a full circle)
+		just with two points starting on top of each other and they indicate wheret the line ends, then can be dragged over each other, but will modular after 720degree
+-->
+<html>
+<head>
+	<meta content="text/html;charset=utf-8" http-equiv="Content-Type">
+	<meta content="utf-8" http-equiv="encoding">
+
+	<title>Draw Shapes</title>
+	<style>
+		body {
+			font-size:10px;
+		}
+		input {
+			max-width:40px;
+			font-size:10px;
+		}
+		#canvas_size {
+			max-width:60px;
+		}
+		#node_list {
+			float:right;
+		}
+		#buttons {
+			float:left;
+			display:block;
+			width:100px;
+		}
+		.button {
+			border:1px black solid;
+			background:#eee;
+		}
+		.current_shape {	
+			background:#eef;
+		}
+		.button:hover {
+			background:#ddd;
+		}
+		#canvas {
+		/*	position:absolute;*/
+		/*	float:right;*/
+			/*left:100px;*/
+			
+		}
+	</style>
+</head>
+<div id='buttons'>
+	<input id='canvas_size' type='number' max='640' min='1' onchange='updateCanvasSize()' value='640'>Size</br>
+	<div class='button' onclick='empty_SHAPES()'>clear</div>
+
+	<div class='button' onclick='dump()'>dump</div>
+	<div class='button' onclick='hide_SHAPES()'>hide</div>
+
+	<div id='circle_button' class='button' onclick='beginCircle()'>Circle</div>
+	<div id='polygon_button' class='button' onclick='beginPolygon()'>Polygon <input id='polygon_sides' type='number' max='32' min='3' onchange='updatePolygonSides()' value='4'>Sides</div>
+</div>
+<div id='temp_node' style='display:none;'>name colours, delete</div>
+
+<canvas id='canvas'>
+
+</canvas>
+
+<div id='node_list'></div>
+<span id='SHAPES'></span>
+<script>
+var CIRCLE_MODE = false;
+var POLYGON_MODE = false;
+var POLYGON_SIZE = 0;
+function beginCircle() {
+	CIRCLE_MODE = true;
+	document.getElementById('circle_button').className += " selected";
+}
+function endCircle() {
+	CIRCLE_MODE = false;
+	document.getElementById('circle_button').className = "button";
+}
+function beginPolygon () {
+	POLYGON_MODE = true;
+	updatePolygonSides();
+	document.getElementById('polygon_button').className += " selected";	
+}
+function endPolygon() {
+	POLYGON_MODE = false;
+	document.getElementById('polygon_button').className = "button";
+}
+function updatePolygonSides () {
+	var size = document.getElementById('polygon_sides').value;
+	POLYGON_SIZE = size;
+}
+
+function updateCanvasSize () {
+	var size = document.getElementById('canvas_size').value;
+	DRAWING_SIZE = STARTING_SIZE /size;
+	ZOOM = DRAWING_SIZE*100;
+}
+function colour_select() {
+
+}
+var HIDDEN = false;
+function hide_SHAPES() {
+	HIDDEN = !HIDDEN;
+	draw();
+}
+function dump () {
+	console.log(DRAWING_SIZE);
+	console.log(SHAPES);
+	var string = "";
+	string += "var shape = [";
+	for (var i = 0; i < SHAPES.length; i++) {
+		var shape = SHAPES[i]['nodes'];
+		string += "];";
+		string += "drawShapes(x, y, shape, canvas, ds);";
+		
+		if (SHAPES[i]['drawing'] != null) {
+			string += "canvas.fillStyle='#"+SHAPES[i]['drawing']['fill']+"';";
+			string += "canvas.strokeStyle='#"+SHAPES[i]['drawing']['stroke']+"';";
+			
+			string += "canvas.lineWidth="+SHAPES[i]['drawing']['lineWidth']+";";
+			string += "canvas.globalAlpha="+(SHAPES[i]['drawing']['alpha']/100)+";";// 0.7;
+			if (!SHAPES[i]['drawing']['type']) string += "// just do strokes ;";
+		}
+		string += "shape = [";
+		for (var j = 0; j < shape.length; j++) {
+			string += "["+shape[j][0]+","+shape[j][1]+"],";
+		}
+	}
+	string += "];";
+	string += "drawShapes(x, y, shape, canvas, ds);";
+			
+	console.log(string);
+}
+
+function add_shape () {
+	SHAPES.push({'drawing':getDrawing(),'nodes':[]});
+	console.log(SHAPES);
+	SELECTED_NODE = [SHAPES.length-1, 0];
+	draw();
+}
+function change_selected (index) {
+	SELECTED_NODE = [index, -1];
+	
+	var sh = document.getElementsByClassName('shape_item');
+	for (var i = 0; i < sh.length; i++) {
+		if (i == index) {
+			sh[i].className = "node_item shape_item current_shape";
+		} else {
+			sh[i].className = "node_item shape_item";		
+		}
+	}
+}
+
+var ZOOM = 100;
+window.onwheel=function(e){
+	if (e.deltaY > 0) ZOOM-=1;
+	if (e.deltaY < 0) ZOOM+=1;
+	DRAWING_SIZE = ZOOM/100;
+
+	draw();
+}; 
+    
+function map_to_screen (xy) {
+		
+	var x = SCREEN_WIDTH/2 + (xy[0] - 0/2) * (DRAWING_SIZE);
+	var y = SCREEN_HEIGHT/2 + (xy[1] - 0/2) * (DRAWING_SIZE);
+	x = Math.floor(x);
+	y = Math.floor(y);
+	
+	return [x,y];
+	
+	//(X - CAM) * CONV + screen/2
+}    
+
+function screen_to_map (xy) {
+	
+	var x = (xy[0] - SCREEN_WIDTH/2) / (DRAWING_SIZE);// + SCREEN_WIDTH/2;
+	var y = (xy[1] - SCREEN_HEIGHT/2) / (DRAWING_SIZE);// + SCREEN_WIDTH/2;
+	return [x,y];
+}    	
+//--         UTILITY  / USER      --//
+function getCursorPosition(e) {		// Finds what pixel was clicked on	-	not made by me
+ //
+
+	var x;
+    var y;
+    if (e.pageX != undefined && e.pageY != undefined) {
+	x = e.pageX;
+	y = e.pageY;
+    }
+    else {
+	x = e.clientX + document.body.scrollLeft +
+            document.documentElement.scrollLeft;
+	y = e.clientY + document.body.scrollTop +
+            document.documentElement.scrollTop;
+    }
+    x -= can.offsetLeft+1;
+    y -= can.offsetTop+1;
+    
+	var xy = screen_to_map([x,y]);
+    return xy;	
+}
+var DRAWING_SIZE = 1;
+//--- 		CANVAS MAINTENANCE 		---//
+var can=document.getElementById("canvas");
+var STARTING_SIZE = 640;
+var SCREEN_HEIGHT = STARTING_SIZE;
+can.height = SCREEN_HEIGHT;
+var SCREEN_WIDTH = STARTING_SIZE;
+can.width = SCREEN_WIDTH;
+var canvas=can.getContext("2d");
+
+
+var SELECTED_NODE = null;
+document.getElementById("canvas").onmousedown = down;
+function down (event) {
+
+	var xy = getCursorPosition(event);
+	
+	if (ALT_ON) {
+		var index = check_for_shape(xy);
+		SELECTED_NODE = [index, -1];
+		PREVIOUS_POINT = xy;
+		return;
+	} else {
+		PREVIOUS_POINT = null;
+	}
+	var index = check_for_node(xy);
+	if (index == null) {
+		if (SELECTED_NODE == null) SELECTED_NODE = [0,0];
+		if (SHAPES[SELECTED_NODE[0]] == null || SHAPES[SELECTED_NODE[0]]['nodes'] == null) {
+			SHAPES[SELECTED_NODE[0]] = {'drawing':getDrawing(),'nodes':[]};
+		}
+		SHAPES[SELECTED_NODE[0]]['nodes'].push(xy);
+		SELECTED_NODE[1] = SHAPES[SELECTED_NODE[0]]['nodes'].length-1;
+	} else {
+		if (CTRL_ON) {
+			SHAPES[index[0]]['nodes'].splice(index[1], 1);
+			SELECTED_NODE[1] = -1;
+		} else {
+			SELECTED_NODE = index;
+		}
+	}
+	draw();
+}
+document.getElementById("canvas").onmouseup = up;
+function up (event) {
+	var xy = getCursorPosition(event);
+	var index = check_for_node(xy);
+	if (index == null) {
+	} else {
+		if (index[0] == SELECTED_NODE[0] && index[1] != SELECTED_NODE[1]) {
+			SHAPES[index[0]]['nodes'].splice(index[1], 0, xy);
+		}
+	}
+	SELECTED_NODE[1] = -1;
+	draw();
+}
+document.getElementById("canvas").onmousemove = move;
+var PREVIOUS_POINT = null;
+function move (event) {
+	var xy = getCursorPosition(event);
+	
+	if (ALT_ON && PREVIOUS_POINT != null) {
+		// drag the whole shape
+		SHAPES[SELECTED_NODE[0]]['nodes'] = move_shape(xy, PREVIOUS_POINT, SHAPES[SELECTED_NODE[0]]['nodes']);
+		PREVIOUS_POINT = xy;
+		draw();
+		return;
+	} else {
+		if (PREVIOUS_POINT != null) up(event);
+		PREVIOUS_POINT = null;
+	}
+	
+	POINTER = [xy[0],xy[1]];
+	if (SELECTED_NODE == null || SELECTED_NODE[1] == -1) {
+	} else {
+		if (SHIFT_ON && SELECTED_NODE[1] > 0) {
+			// snap to
+			var xy2 = SHAPES[SELECTED_NODE[0]]['nodes'][SELECTED_NODE[1]-1];
+			var dx = Math.abs(xy2[0]-xy[0]);
+			var dy = Math.abs(xy2[1]-xy[1]);
+			if (dx/2 < dy && dx > dy/2) {
+				var ndx = -(xy2[0]-xy[0]);
+				var ndy = -(xy2[1]-xy[1]);
+				xy[0] = xy2[0]+ndx;
+
+				if ( (ndx>0 && ndy<0) || (ndx<0 && ndy>0) ) {
+					ndx = -ndx;
+				}
+				xy[1] = xy2[1]+ndx;			
+			} else if (dx > dy) {
+				xy[1] = xy2[1];
+			} else {
+				xy[0] = xy2[0];
+			}
+			SHAPES[SELECTED_NODE[0]]['nodes'][SELECTED_NODE[1]] = [xy[0],xy[1]];
+		} else {
+			SHAPES[SELECTED_NODE[0]]['nodes'][SELECTED_NODE[1]] = [xy[0],xy[1]];
+		}
+	}
+	draw();
+}
+		
+document.addEventListener("keydown", keyboardInput);
+document.addEventListener("keyup", ctrlOff);
+var CTRL_ON = false;
+var SHIFT_ON = false;
+var ALT_ON = false;
+function keyboardInput (e) {
+	var keynum;
+
+	if(window.event) { // IE                    
+	  keynum = e.keyCode;
+	} else if(e.which){ // Netscape/Firefox/Opera                   
+	  keynum = e.which;
+	}
+	// console.log(keynum);
+	if (keynum === 16) {
+		SHIFT_ON = true;
+		return;
+	}
+	if (keynum === 17) {	// ctrl
+		CTRL_ON = true;
+		return;
+	}
+	if (keynum === 18) {	// ctrl
+		ALT_ON = true;
+		e.preventDefault();
+		return;
+	}	
+	// shift is 16
+	// alt is 18
+}
+function ctrlOff (e) {
+	var keynum;
+
+	if(window.event) { // IE                    
+	  keynum = e.keyCode;
+	} else if(e.which){ // Netscape/Firefox/Opera                   
+	  keynum = e.which;
+	}
+	if (keynum === 16) {
+		SHIFT_ON = false;
+		return;
+	}
+	if (keynum === 17) {	// ctrl
+		CTRL_ON = false;
+		return;
+	}
+	if (keynum === 18) {	// ctrl
+		ALT_ON = false;
+		e.preventDefault();
+		return;
+	}	
+}
+
+var SHAPES = [{'drawing':getDrawing(),'nodes':[]}];	//	{'drawing':{},'nodes':[]}
+function getDrawing () {
+	var o = {'fill':'000', 'stroke':'000','type':false, 'alpha':100,'lineWidth':1};
+	return o;
+}
+var POINTER = [];
+function empty_SHAPES () {
+	SHAPES = [];
+	draw();
+}
+function getColours () {
+	// go through the node list to get all the colours
+	var colours = [];
+	var shapes = document.getElementById('node_list').getElementsByClassName('shape_item');
+	for (var i = 0; i < shapes.length; i++) {
+		var inputs = shapes[i].getElementsByTagName('input');
+		var c = {'fill':'000','stroke':'000'};
+		for (var j = 0; j < inputs.length; j++) {
+			if (inputs[j].type == "checkbox") {
+				c[inputs[j].name] = inputs[j].checked;
+			} else {
+				c[inputs[j].name] = inputs[j].value;
+			}
+		}
+		colours.push(c);
+	}
+	return colours;
+
+}
+function draw () {
+	canvas.fillRect(0, 0, SCREEN_WIDTH,SCREEN_HEIGHT);
+	canvas.clearRect(2, 2, SCREEN_WIDTH-4,SCREEN_HEIGHT-4);
+
+	canvas.beginPath();
+	var colours = getColours();
+	document.getElementById('node_list').innerHTML = "";
+	var current_node = 0;
+	for (var i = 0; i < SHAPES.length; i++) {
+		if (SHAPES[i] == null) continue;
+		
+		if (i > 0 && SHAPES[i-1]['drawing'] != null && SHAPES[i-1]['drawing']['type'] !== null) {
+			if (SHAPES[i-1]['drawing']['type']) {
+				canvas.fill();		
+			} else {
+				canvas.stroke();					
+			}
+		} else {
+			canvas.fill();		
+		}
+		canvas.beginPath();
+		var fill = "000";
+		var stroke = "000";
+		var width = 1;
+		var alpha = 1;
+		var type = "";
+		SHAPES[i]['drawing'] = colours[i];
+		if (SHAPES[i]['drawing'] != null) {
+			fill = SHAPES[i]['drawing']['fill'];
+			stroke = SHAPES[i]['drawing']['stroke'];
+			
+			width = SHAPES[i]['drawing']['lineWidth'];
+			alpha = (SHAPES[i]['drawing']['alpha']/100);// 0.7;
+
+			if (SHAPES[i]['drawing']['type']) type = "checked";
+		}
+		var sel = "";
+		if (SELECTED_NODE != null && SELECTED_NODE[0] == i) sel = "current_shape";
+		var node_selector = "<div id='shape_"+i+"' class='node_item shape_item "+sel+"' onchange='draw()' onclick='change_selected("+i+")'>"+current_node+"<input type='text' name='fill' value='"+fill+"'><input type='text' name='stroke' value='"+stroke+"'> ";
+		node_selector += "<input type='number' name='alpha' max='100' min='1' value='"+(alpha*100)+"'>";
+		node_selector += "<input type='number' name='lineWidth' max='10' min='1' value='"+width+"'>";
+		node_selector += "<input class='check' type='checkbox' name='type' "+type+">Fill";
+		node_selector += "</div>";
+		
+		document.getElementById('node_list').innerHTML += node_selector;
+			
+		var shape = SHAPES[i]['nodes'];
+		if (shape == null || shape.length == 0) continue;
+
+		canvas.lineWidth = width;
+		canvas.globalAlpha= alpha;
+		
+		canvas.strokeStyle = '#'+stroke;
+		canvas.fillStyle = '#'+fill;
+		var xy = map_to_screen(shape[0]);
+		canvas.moveTo(xy[0],xy[1]);		
+	
+		for (var j = 0; j < shape.length; j++) {
+			var xy = map_to_screen(shape[j]);
+			canvas.lineTo(xy[0],xy[1]);
+		}
+	}
+	canvas.stroke();
+
+	var node_selector = "<div class='node_item button' onclick='add_shape()'>+</div>";
+	document.getElementById('node_list').innerHTML += node_selector;	
+			
+	canvas.strokeStyle = '#000';
+	canvas.fillStyle = '#000';
+	canvas.lineWidth = 1;
+	canvas.globalAlpha= 1;
+
+	if (!HIDDEN) {
+		for (var i = 0; i < SHAPES.length; i++) {
+			var shape = SHAPES[i]['nodes'];
+			for (var j = 0; j < shape.length; j++) {
+				canvas.beginPath();
+				var xy = map_to_screen(shape[j]);
+				canvas.arc(xy[0],xy[1], 2, 0, Math.PI*2);
+				canvas.stroke();
+			}
+		}
+	}
+	canvas.beginPath();
+	var xy = map_to_screen(POINTER);
+	canvas.arc(xy[0],xy[1], 1, 0, Math.PI*2);
+	canvas.fill();
+
+	document.getElementById('SHAPES').innerHTML = SHAPES.length;
+	
+}
+function move_shape (new_xy, old_xy, shape) {
+	var new_shape = [];
+	for (var j = 0; j < shape.length; j++) {
+		var xy2 = [shape[j][0],shape[j][1]];
+		xy2[0] = xy2[0] + (new_xy[0]-old_xy[0]);
+		xy2[1] = xy2[1] + (new_xy[1]-old_xy[1]);
+		new_shape[j] = [xy2[0], xy2[1]];
+	}
+	return new_shape;
+}		
+function check_for_shape (xy) {
+	return 0;
+}
+function check_for_node (xy) {
+	var hit_range = 6;
+	for (var i = 0; i < SHAPES.length; i++) {
+		var shape = SHAPES[i]['nodes'];
+		for (var j = 0; j < shape.length; j++) {
+			var xy2 = [shape[j][0],shape[j][1]];// map_to_screen(SHAPES[i][0], SHAPES[i][1]);
+			if (Math.abs(xy2[0] - xy[0]) < hit_range && Math.abs(xy2[1] - xy[1]) < hit_range) {
+				return [i,j];
+			}
+		}
+	}
+	return null;
+}
+
+updateCanvasSize();
+draw();
+
+</script>
